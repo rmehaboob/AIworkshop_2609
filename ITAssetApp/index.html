@@ -1,1 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IT Asset Tracker — CSV Import</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { boxShadow: { soft: '0 10px 25px -10px rgba(0,0,0,0.25)' } } } };
+  </script>
+  <style>
+    .thin::-webkit-scrollbar{height:8px;width:8px}
+    .thin::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:9999px}
+    .toast-enter{animation: toastIn .3s ease-out}
+    @keyframes toastIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+  <!-- Import Summary Toast / Banner -->
+  <div id="importToast" class="hidden fixed z-50 top-4 inset-x-0 px-4">
+    <div class="max-w-3xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-soft toast-enter">
+      <div class="p-4 flex items-start gap-3">
+        <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white grid place-items-center">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7 20h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        </div>
+        <div class="flex-1">
+          <div id="toastMsg" class="text-sm font-medium">Imported 0 assets, skipped 0 invalid rows.</div>
+          <button id="toggleErrors" class="mt-1 text-xs text-slate-600 underline">Show details</button>
+          <div id="errorList" class="hidden mt-2 max-h-48 overflow-auto thin">
+            <!-- errors go here -->
+          </div>
+        </div>
+        <button id="dismissToast" class="text-slate-500 hover:text-slate-700">✕</button>
+      </div>
+    </div>
+  </div>
 
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white grid place-items-center shadow-soft">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h18v12H3zM8 20h8"/></svg>
+        </div>
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">IT Asset Tracker</h1>
+          <p class="text-sm text-slate-500">Cards, actions, alerts, auto‑refresh — now with CSV import</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button id="addDemoBtn" class="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-soft text-sm">Add 5 Demo Assets</button>
+        <button id="bulkOSBtn" class="px-3 py-2 rounded-xl bg-slate-900 text-white hover:bg-black shadow-soft text-sm">Bulk: Update OS</button>
+        <div class="flex items-center gap-2">
+          <label for="refreshInterval" class="text-sm text-slate-600">Auto-refresh</label>
+          <select id="refreshInterval" class="text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-soft">
+            <option value="0">Off</option>
+            <option value="5">Every 5s</option>
+            <option value="10">Every 10s</option>
+            <option value="30">Every 30s</option>
+            <option value="60">Every 60s</option>
+          </select>
+        </div>
+        <!-- CSV Upload -->
+        <input id="csvInput" type="file" accept=".csv" class="hidden" />
+        <button id="uploadCsvBtn" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 shadow-soft text-sm">Upload CSV</button>
+        <button id="resetDataBtn" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm">Reset Data</button>
+      </div>
+    </header>
+
+    <!-- Summary Bar -->
+    <section id="summaryBar" class="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4"></section>
+
+    <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Alerts Panel -->
+      <section class="lg:col-span-1">
+        <div class="bg-white rounded-2xl shadow-soft p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold">Alerts</h2>
+            <span id="alertCount" class="text-xs px-2 py-1 rounded-full bg-rose-100 text-rose-700">0</span>
+          </div>
+          <div id="alertsList" class="mt-3 space-y-3 max-h-[360px] overflow-auto thin"></div>
+        </div>
+
+        <!-- Smart Assistant -->
+        <div class="bg-white rounded-2xl shadow-soft p-4 mt-6">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold">Smart Assistant</h2>
+            <button id="refreshSuggestions" class="text-xs px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200">Refresh</button>
+          </div>
+          <ul id="suggestionsList" class="mt-3 space-y-2"></ul>
+        </div>
+      </section>
+
+      <!-- Assets Grid -->
+      <section class="lg:col-span-2">
+        <div class="flex items-center justify-between mb-3 gap-3">
+          <div class="flex items-center gap-2">
+            <input id="searchBox" type="search" placeholder="Search by ID, user, or type…" class="w-full md:w-80 px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white shadow-soft" />
+            <select id="typeFilter" class="text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-soft">
+              <option value="">All Types</option>
+              <option>Laptop</option>
+              <option>Mobile</option>
+              <option>Tablet</option>
+            </select>
+            <select id="statusFilter" class="text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-soft">
+              <option value="">All Statuses</option>
+              <option>provisioned</option>
+              <option>assigned</option>
+              <option>up-for-replacement</option>
+              <option>retired</option>
+            </select>
+          </div>
+          <button id="clearFilters" class="text-sm px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200">Clear</button>
+        </div>
+
+        <div id="assetsGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </section>
+    </div>
+
+    <footer class="mt-10 text-center text-xs text-slate-500">Self-contained demo. Data stored locally in your browser.</footer>
+  </div>
+
+  <script>
+    /*********************
+     * Simple Data Model *
+     *********************/
+    const STORAGE_KEY = 'it-asset-tracker:csv:v1';
+
+    /** Asset shape
+     * {
+     *   id: string,
+     *   type: 'Laptop' | 'Mobile' | 'Tablet',
+     *   status: 'provisioned' | 'assigned' | 'up-for-replacement' | 'retired',
+     *   patchStatus: 'applied' | 'pending',
+     *   osStatus: 'up-to-date' | 'pending',
+     *   assignedUser: string | '',
+     *   lastUpdated: number (epoch ms),
+     *   ageDays: number,
+     *   flaggedForReplacement: boolean,
+     *   department?: string,
+     *   lastOSUpdate?: number
+     * }
+     */
+
+    const state = { assets: [], timerId: null, search: '', filterType: '', filterStatus: '' };
+
+    // Utilities
+    const now = () => Date.now();
+    const daysToMs = (d) => d * 24 * 60 * 60 * 1000;
+    const fmtDate = (ms) => new Date(ms).toLocaleString();
+    const uid = () => 'A' + Math.random().toString(36).slice(2, 8).toUpperCase();
+
+    // Persistence
+    function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify({ assets: state.assets })); }
+    function loadState(){ const raw = localStorage.getItem(STORAGE_KEY); if(!raw) return; try{ const parsed=JSON.parse(raw); if(Array.isArray(parsed.assets)) state.assets = parsed.assets; }catch{} }
+
+    /****************
+     * Demo Seeder  *
+     ****************/
+    const sampleUsers = ['Alex Chen','Priya Singh','Sam Carter','Jordan Lee','Taylor Fox','Pat Morgan','Jamie Ortiz'];
+    const types = ['Laptop','Mobile','Tablet'];
+    function randomFrom(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+    function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+    function makeDemoAsset(){
+      const type = randomFrom(types);
+      const isAssigned = Math.random() > 0.4; // ~60% assigned
+      const osPending = Math.random() > 0.7; // ~30% pending
+      const patchPending = Math.random() > 0.65; // ~35% pending
+      const ageDays = randInt(30, 1600); // 1 month to ~4.5 yrs
+      const statusWeights = ['provisioned','assigned','assigned','assigned','up-for-replacement','retired'];
+      let status = randomFrom(statusWeights);
+      if (isAssigned && status === 'provisioned') status = 'assigned';
+      if (!isAssigned && status === 'assigned') status = 'provisioned';
+      return {
+        id: uid(),
+        type,
+        status,
+        patchStatus: patchPending ? 'pending' : 'applied',
+        osStatus: osPending ? 'pending' : 'up-to-date',
+        assignedUser: isAssigned ? randomFrom(sampleUsers) : '',
+        lastUpdated: now() - daysToMs(randInt(0, 120)),
+        ageDays,
+        flaggedForReplacement: status === 'up-for-replacement'
+      };
+    }
+
+    function addDemoAssets(n=5){ for(let i=0;i<n;i++) state.assets.unshift(makeDemoAsset()); saveState(); renderAll(); }
+
+    /****************
+     * Core Actions  *
+     ****************/
+    function touch(asset){ asset.lastUpdated = now(); }
+    function assignAsset(id){ const a = state.assets.find(x=>x.id===id); if(!a) return; const name = prompt('Assign to which user? (Leave blank to cancel)', a.assignedUser||''); if(name===null) return; a.assignedUser = name.trim(); if(a.assignedUser) a.status='assigned'; touch(a); saveState(); renderAll(); }
+    function unassignAsset(id){ const a = state.assets.find(x=>x.id===id); if(!a) return; a.assignedUser=''; if(a.status==='assigned') a.status='provisioned'; touch(a); saveState(); renderAll(); }
+    function markPatchApplied(id){ const a = state.assets.find(x=>x.id===id); if(!a) return; a.patchStatus='applied'; touch(a); saveState(); renderAll(); }
+    function flagForReplacement(id){ const a = state.assets.find(x=>x.id===id); if(!a) return; a.flaggedForReplacement=true; a.status='up-for-replacement'; touch(a); saveState(); renderAll(); }
+    function retireAsset(id){ const a = state.assets.find(x=>x.id===id); if(!a) return; a.status='retired'; touch(a); saveState(); renderAll(); }
+    function bulkUpdateOS(){ let changed=0; state.assets.forEach(a=>{ if(a.osStatus==='pending'){ a.osStatus='up-to-date'; touch(a); changed++; } }); if(changed===0) alert('No devices with pending OS updates.'); saveState(); renderAll(); }
+
+    /************************
+     * Auto-Refresh Simulate *
+     ************************/
+    function simulateDrift(){
+      state.assets.forEach(a=>{
+        if (Math.random() < 0.05 && a.status!=='retired') { a.patchStatus = a.patchStatus==='pending' ? 'applied' : 'pending'; touch(a); }
+        if (Math.random() < 0.04 && a.status!=='retired') { a.osStatus = a.osStatus==='pending' ? 'up-to-date' : 'pending'; touch(a); }
+        if (Math.random() < 0.02 && !a.assignedUser && a.status!=='retired') { a.assignedUser = randomFrom(sampleUsers); a.status='assigned'; touch(a); }
+      });
+      saveState();
+    }
+    function setRefreshInterval(seconds){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } if(seconds>0){ state.timerId = setInterval(()=>{ simulateDrift(); renderAll(); }, seconds*1000); } }
+
+    /****************
+     * Derivations   *
+     ****************/
+    function getFilteredAssets(){ const q = state.search.toLowerCase().trim(); return state.assets.filter(a=>{ const matchesQ = !q || a.id.toLowerCase().includes(q) || (a.assignedUser && a.assignedUser.toLowerCase().includes(q)) || a.type.toLowerCase().includes(q); const matchesType = !state.filterType || a.type===state.filterType; const matchesStatus = !state.filterStatus || a.status===state.filterStatus; return matchesQ && matchesType && matchesStatus; }); }
+
+    function summarize(assets){ const s={ total: assets.length, byType: {Laptop:0,Mobile:0,Tablet:0}, upForReplacement:0, pendingPatches:0, pendingOS:0 }; assets.forEach(a=>{ s.byType[a.type] = (s.byType[a.type]||0)+1; if(a.status==='up-for-replacement') s.upForReplacement++; if(a.patchStatus==='pending') s.pendingPatches++; if(a.osStatus==='pending') s.pendingOS++; }); return s; }
+
+    function generateAlerts(assets){ const alerts=[]; const THIRTY_D=daysToMs(30); const overDueCutoff = now()-daysToMs(21); assets.forEach(a=>{
+        const lastOSRef = a.lastOSUpdate || a.lastUpdated;
+        if (a.osStatus==='pending' && lastOSRef < overDueCutoff && a.status!=='retired'){
+          alerts.push({ type:'OS', severity:'warning', id:a.id, message:'OS update overdue', rationale:`${a.type} ${a.id} shows OS pending; last OS activity ${timeAgo(lastOSRef)}.`});
+        }
+        if (!a.assignedUser && (now()-a.lastUpdated) > THIRTY_D && a.status!=='retired'){
+          alerts.push({ type:'Idle', severity:'info', id:a.id, message:'Unassigned > 30 days', rationale:`${a.type} ${a.id} unassigned for ${timeAgoExact(a.lastUpdated)}.`});
+        }
+        if (a.flaggedForReplacement || a.status==='up-for-replacement'){
+          alerts.push({ type:'Replace', severity:'critical', id:a.id, message:'Flagged for replacement', rationale:`${a.type} ${a.id} marked for replacement${a.ageDays? ` (age ${a.ageDays}d)` : ''}.`});
+        }
+      });
+      return alerts.sort((x,y)=>({critical:0,warning:1,info:2}[x.severity]-({critical:0,warning:1,info:2}[y.severity])));
+    }
+
+    function timeAgo(ts){ const diff = now()-ts; const d=Math.floor(diff/daysToMs(1)); if(d>0) return `${d}d ago`; const h=Math.floor(diff/(60*60*1000)); if(h>0) return `${h}h ago`; const m=Math.floor(diff/(60*1000)); return `${m}m ago`; }
+    function timeAgoExact(ts){ const diff=now()-ts; const d=Math.floor(diff/daysToMs(1)); const h=Math.floor((diff%daysToMs(1))/(60*60*1000)); return `${d}d ${h}h`; }
+
+    /****************
+     * Rendering     *
+     ****************/
+    function pill(color,text){ const map={green:'bg-green-100 text-green-700',yellow:'bg-yellow-100 text-yellow-800',slate:'bg-slate-100 text-slate-700',red:'bg-rose-100 text-rose-700',blue:'bg-sky-100 text-sky-700'}; return `<span class="px-2 py-0.5 text-xs rounded-full ${map[color]||map.slate}">${text}</span>`; }
+    function statusPill(status){ const map={ provisioned:['blue','provisioned'], assigned:['green','assigned'], 'up-for-replacement':['yellow','up-for-replacement'], retired:['red','retired'] }; const [c,t]=map[status]||['slate',status]; return pill(c,t); }
+
+    function renderSummary(){ const s = summarize(state.assets); const cards=[ {title:'Total Assets', value:s.total, sub:`${s.byType.Laptop||0} Laptops • ${s.byType.Mobile||0} Mobiles • ${s.byType.Tablet||0} Tablets`, icon:'M3 7l9-4 9 4-9 4-9-4z'}, {title:'Up for Replacement', value:s.upForReplacement, sub:'Devices flagged or near EOL', icon:'M12 8v4l3 3'}, {title:'Pending Patches', value:s.pendingPatches, sub:'Security patches not applied', icon:'M12 8v8m-4-4h8'}, {title:'Pending OS Updates', value:s.pendingOS, sub:'OS updates required', icon:'M4 4h16v16H4z'} ];
+      document.getElementById('summaryBar').innerHTML = cards.map(c=>`<div class="bg-white rounded-2xl shadow-soft p-4"><div class="flex items-center justify-between"><h3 class="text-sm font-medium text-slate-500">${c.title}</h3><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" class=\"w-6 h-6 text-indigo-600\"><path stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"${c.icon}\"/></svg></div><div class="mt-2 text-3xl font-semibold">${c.value}</div><div class="text-xs text-slate-500 mt-1">${c.sub}</div></div>`).join(''); }
+
+    function renderAlerts(){ const alerts = generateAlerts(state.assets); document.getElementById('alertCount').textContent = alerts.length; document.getElementById('alertsList').innerHTML = alerts.map(a=>{ const color = a.severity==='critical' ? 'bg-rose-50 border-rose-200' : a.severity==='warning' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'; const dot = a.severity==='critical' ? 'bg-rose-500' : a.severity==='warning' ? 'bg-amber-500' : 'bg-slate-400'; return `<div class="p-3 rounded-xl border ${color}"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${dot}"></span><span class="text-sm font-medium">${a.message}</span></div><span class="text-[10px] text-slate-500">${a.id}</span></div><p class="text-xs text-slate-600 mt-1">${a.rationale}</p></div>`; }).join('') || '<p class="text-sm text-slate-500">No alerts 🎉</p>'; }
+
+    function renderSuggestions(){ const assets=state.assets; const s=summarize(assets); const idle=assets.filter(a=>!a.assignedUser&&(now()-a.lastUpdated)>daysToMs(30)&&a.status!=='retired'); const osPending=assets.filter(a=>a.osStatus==='pending' && a.status!=='retired'); const replaceSoon=assets.filter(a=>a.ageDays>1200 && a.status!=='retired' && a.status!=='up-for-replacement'); const suggestions=[]; if(osPending.length>0){ suggestions.push({label:`Bulk update OS on ${osPending.length} device(s)`, action:'bulkOS'}); } if(idle.length>0){ suggestions.push({label:`Reassign ${idle.length} idle device(s) (>30d)`, action:'openIdle'}); } if(replaceSoon.length>0){ suggestions.push({label:`Schedule replacement for ${replaceSoon.length} aging device(s)`, action:'flagAging'}); } if(s.pendingPatches>0){ suggestions.push({label:`Nudge owners of ${s.pendingPatches} device(s) with pending patches`, action:'noop'}); }
+      const ul=document.getElementById('suggestionsList'); ul.innerHTML = suggestions.map(sug=>`<li><button data-sug="${sug.action}" class="w-full text-left px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm">${sug.label}</button></li>`).join('') || '<li class="text-sm text-slate-500">All good for now 🎯</li>'; ul.querySelectorAll('button[data-sug]').forEach(btn=>{ btn.addEventListener('click',(e)=>{ const action=e.currentTarget.getAttribute('data-sug'); if(action==='bulkOS'){ bulkUpdateOS(); return; } if(action==='openIdle'){ state.search=''; state.filterStatus=''; state.filterType=''; document.getElementById('searchBox').value=''; document.getElementById('statusFilter').value=''; document.getElementById('typeFilter').value=''; renderAssets(assets.filter(a=>!a.assignedUser&&(now()-a.lastUpdated)>daysToMs(30)&&a.status!=='retired')); return; } if(action==='flagAging'){ const aging=assets.filter(a=>a.ageDays>1200 && a.status!=='retired'); aging.forEach(a=>{ a.flaggedForReplacement=true; a.status='up-for-replacement'; touch(a); }); saveState(); renderAll(); return; } alert('Suggestion recorded.'); }); }); }
+
+    function renderAssets(filtered){ const assets = (filtered || getFilteredAssets()); const grid=document.getElementById('assetsGrid'); grid.innerHTML = assets.map(a=>`<div class="bg-white rounded-2xl shadow-soft p-4 border border-slate-100 flex flex-col"><div class="flex items-start justify-between gap-2"><div><div class="flex items-center gap-2"><h3 class="font-semibold tracking-tight">${a.type}</h3>${statusPill(a.status)}</div><div class="text-xs text-slate-500 mt-0.5">Asset ID: <span class="font-mono">${a.id}</span>${a.department ? ` • <span>${a.department}</span>`:''}</div></div><div class="text-right text-xs text-slate-500"><div>Last updated</div><div class="font-medium">${timeAgo(a.lastUpdated)}</div></div></div><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-3"><div class="text-slate-500">Assigned user</div><div class="font-medium">${a.assignedUser || '<span class=\"text-slate-400 italic\">Unassigned</span>'}</div><div class="text-slate-500">Patch status</div><div>${a.patchStatus==='pending'? pill('red','pending') : pill('green','applied')}</div><div class="text-slate-500">OS update</div><div>${a.osStatus==='pending'? pill('yellow','pending') : pill('green','up‑to‑date')}</div><div class="text-slate-500">Age</div><div class="font-medium">${a.ageDays? a.ageDays : '—'} ${a.ageDays? 'days':''}</div></div><div class="mt-4 grid grid-cols-2 gap-2"><button onclick="assignAsset('${a.id}')" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm">Assign</button><button onclick="unassignAsset('${a.id}')" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm">Unassign</button><button onclick="markPatchApplied('${a.id}')" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm">Mark Patch Applied</button><button onclick="flagForReplacement('${a.id}')" class="px-3 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-sm">Flag for Replacement</button><button onclick="retireAsset('${a.id}')" class="col-span-2 px-3 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-sm">Retire</button></div><div class="mt-3 text-[11px] text-slate-500">Timestamp: ${fmtDate(a.lastUpdated)}${a.lastOSUpdate? ` • Last OS update: ${fmtDate(a.lastOSUpdate)}`:''}</div></div>`).join('') || '<div class="text-sm text-slate-500">No assets match the filters.</div>'; }
+
+    function renderAll(){ renderSummary(); renderAssets(); renderAlerts(); renderSuggestions(); }
+
+    /****************
+     * CSV IMPORT    *
+     ****************/
+    const REQUIRED_HEADERS = ['asset_id','type','status','patch_status','os_status','assigned_user','last_updated'];
+    const OPTIONAL_HEADERS = ['department','device_age_months','last_os_update'];
+
+    function showToast(message, errors){
+      const toast = document.getElementById('importToast');
+      document.getElementById('toastMsg').textContent = message;
+      const el = document.getElementById('errorList');
+      if(errors && errors.length){
+        el.innerHTML = errors.map(err=>`<div class="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2 mb-1">Row ${err.row}: ${err.reason}</div>`).join('');
+        document.getElementById('toggleErrors').classList.remove('hidden');
+      } else {
+        el.innerHTML = '';
+        document.getElementById('toggleErrors').classList.add('hidden');
+      }
+      toast.classList.remove('hidden');
+    }
+
+    function hideToast(){ document.getElementById('importToast').classList.add('hidden'); }
+
+    function parseCSV(text){
+      // Basic CSV parser supporting quotes and commas
+      const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+      const rows = lines.map(splitCSVLine);
+      return rows;
+    }
+    function splitCSVLine(line){
+      const out=[]; let cur=''; let inQ=false; for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch==='"'){
+          if(inQ && line[i+1]==='"'){ cur+='"'; i++; }
+          else { inQ=!inQ; }
+        } else if(ch===',' && !inQ){ out.push(cur); cur=''; }
+        else { cur+=ch; }
+      }
+      out.push(cur); return out.map(s=>s.trim());
+    }
+
+    function parseDateFlexible(str){
+      if(!str) return NaN;
+      const s = String(str).trim();
+      // Accept ISO or "YYYY-MM-DD HH:MM" (treat as local time)
+      const iso = Date.parse(s);
+      if(!Number.isNaN(iso)) return iso;
+      // Try replacing space with 'T'
+      const alt = Date.parse(s.replace(' ', 'T'));
+      if(!Number.isNaN(alt)) return alt;
+      return NaN;
+    }
+
+    function normalizeType(v){ const m=String(v||'').toLowerCase().trim(); if(['laptop','mobile','tablet'].includes(m)) return m.charAt(0).toUpperCase()+m.slice(1); return null; }
+    function normalizeStatus(v){ const m=String(v||'').toLowerCase().trim(); const ok=['provisioned','assigned','up-for-replacement','retired']; return ok.includes(m)? m : null; }
+    function normalizePatch(v){ const m=String(v||'').toLowerCase().trim(); const ok=['applied','pending']; return ok.includes(m)? m : null; }
+    function normalizeOS(v){ const m=String(v||'').toLowerCase().trim(); const ok=['up-to-date','pending']; return ok.includes(m)? m : null; }
+
+    function handleCSVText(text){
+      const rows = parseCSV(text);
+      if(rows.length===0){ showToast('No data found in CSV.', []); return; }
+      // Header mapping (case-insensitive)
+      const header = rows[0].map(h=>String(h).trim());
+      const lcMap = {}; header.forEach((h,idx)=>{ lcMap[h.toLowerCase()] = idx; });
+
+      // Validate required headers exist (by name, any order)
+      const missingHeaders = REQUIRED_HEADERS.filter(h=> lcMap[h]===undefined );
+      if(missingHeaders.length){ showToast(`Missing required column(s): ${missingHeaders.join(', ')}`, []); return; }
+
+      const errors=[]; const imported=[];
+      for(let r=1; r<rows.length; r++){
+        const row=rows[r];
+        if(row.length===1 && row[0]==='') continue; // skip blank line
+        function get(col){ const idx = lcMap[col]; return idx===undefined? '' : row[idx]; }
+        const asset_id = String(get('asset_id')).trim();
+        const type = normalizeType(get('type'));
+        const status = normalizeStatus(get('status'));
+        const patch = normalizePatch(get('patch_status'));
+        const os = normalizeOS(get('os_status'));
+        let user = String(get('assigned_user') ?? '').trim();
+        if(!user || user.toLowerCase()==='unassigned') user = '';
+        const lastUpdatedStr = String(get('last_updated')).trim();
+        const lastUpdated = parseDateFlexible(lastUpdatedStr);
+        // Optionals
+        const department = String(get('department')||'').trim() || undefined;
+        const ageMonthsRaw = String(get('device_age_months')||'').trim();
+        const lastOSStr = String(get('last_os_update')||'').trim();
+        const lastOSUpdate = lastOSStr ? parseDateFlexible(lastOSStr) : undefined;
+
+        // Required validation
+        const reasons=[];
+        if(!asset_id) reasons.push('missing asset_id');
+        if(!type) reasons.push('invalid type');
+        if(!status) reasons.push('invalid status');
+        if(!patch) reasons.push('invalid patch_status');
+        if(!os) reasons.push('invalid os_status');
+        if(Number.isNaN(lastUpdated)) reasons.push('invalid last_updated');
+        if(lastOSStr && Number.isNaN(lastOSUpdate)) reasons.push('invalid last_os_update');
+        let ageMonths; if(ageMonthsRaw){ ageMonths = Number(ageMonthsRaw); if(Number.isNaN(ageMonths)) reasons.push('non-numeric device_age_months'); }
+
+        if(reasons.length){ errors.push({ row: r+1, reason: reasons.join('; ') }); continue; }
+
+        imported.push({
+          id: asset_id,
+          type,
+          status,
+          patchStatus: patch,
+          osStatus: os,
+          assignedUser: user,
+          lastUpdated,
+          ageDays: ageMonths ? Math.round(ageMonths*30) : undefined,
+          flaggedForReplacement: status==='up-for-replacement',
+          department,
+          lastOSUpdate
+        });
+      }
+
+      if(imported.length===0){ showToast('All rows invalid. Existing data unchanged.', errors); return; }
+
+      // Merge: new rows first (so they appear first)
+      state.assets = [...imported, ...state.assets];
+      saveState();
+      renderAll();
+      showToast(`Imported ${imported.length} assets, skipped ${errors.length} invalid row(s).`, errors);
+    }
+
+    /****************
+     * Event Wiring  *
+     ****************/
+    function wireControls(){
+      document.getElementById('addDemoBtn').addEventListener('click', ()=> addDemoAssets(5));
+      document.getElementById('bulkOSBtn').addEventListener('click', bulkUpdateOS);
+      document.getElementById('refreshInterval').addEventListener('change', (e)=> setRefreshInterval(parseInt(e.target.value,10)) );
+      document.getElementById('searchBox').addEventListener('input', (e)=>{ state.search=e.target.value; renderAssets(); });
+      document.getElementById('typeFilter').addEventListener('change', (e)=>{ state.filterType=e.target.value; renderAssets(); });
+      document.getElementById('statusFilter').addEventListener('change', (e)=>{ state.filterStatus=e.target.value; renderAssets(); });
+      document.getElementById('clearFilters').addEventListener('click', ()=>{ state.search=''; state.filterType=''; state.filterStatus=''; document.getElementById('searchBox').value=''; document.getElementById('typeFilter').value=''; document.getElementById('statusFilter').value=''; renderAssets(); });
+      document.getElementById('refreshSuggestions').addEventListener('click', renderSuggestions);
+
+      // CSV Upload button
+      const csvBtn = document.getElementById('uploadCsvBtn');
+      const csvInput = document.getElementById('csvInput');
+      csvBtn.addEventListener('click', ()=> csvInput.click());
+      csvInput.addEventListener('change', (e)=>{
+        const file = e.target.files && e.target.files[0];
+        if(!file) return;
+        if(!file.name.toLowerCase().endsWith('.csv')){ alert('Please select a .csv file.'); return; }
+        const reader = new FileReader();
+        reader.onload = (evt)=>{ try{ handleCSVText(String(evt.target.result)); } catch(err){ showToast('Failed to import CSV.', [{row:'-', reason: String(err)}]); } };
+        reader.onerror = ()=> showToast('Failed to read file.', [{row:'-', reason:'FileReader error'}]);
+        reader.readAsText(file);
+        // reset input so selecting the same file again triggers change
+        e.target.value='';
+      });
+
+      // Toast toggles
+      document.getElementById('toggleErrors').addEventListener('click', ()=>{
+        const el = document.getElementById('errorList');
+        const isHidden = el.classList.contains('hidden');
+        el.classList.toggle('hidden');
+        document.getElementById('toggleErrors').textContent = isHidden ? 'Hide details' : 'Show details';
+      });
+      document.getElementById('dismissToast').addEventListener('click', hideToast);
+
+      // Reset Data
+      document.getElementById('resetDataBtn').addEventListener('click', ()=>{
+        if(!confirm('Reset data to default synthetic dataset?')) return;
+        localStorage.removeItem(STORAGE_KEY);
+        state.assets = [];
+        addDemoAssets(8);
+      });
+    }
+
+    /****************
+     * Boot          *
+     ****************/
+    (function init(){
+      loadState();
+      if (state.assets.length===0) addDemoAssets(8); else renderAll();
+      wireControls();
+    })();
+  </script>
+</body>
+</html>
